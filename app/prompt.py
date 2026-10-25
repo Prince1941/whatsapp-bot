@@ -1,5 +1,5 @@
 import re
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from app.models import StyleProfile, DraftRequest
 
 
@@ -53,22 +53,105 @@ def is_echo_of_incoming(draft: str, incoming_cleaned: str) -> bool:
 
     # If incoming was a short question and draft just restates it
     if len(in_norm.split()) <= 6 and d_norm.startswith(in_norm) and "?" in draft:
-        # Check if there is an answer before or after
-        # If the whole draft is just the incoming words plus minimal fluff
         if len(d_norm.split()) <= len(in_norm.split()) + 3:
             return True
 
     return False
 
 
-def build_system_prompt(profile: StyleProfile, intensity: str) -> str:
+def detect_intent_category(incoming_text: str, user_intent: Optional[str] = "") -> str:
+    """Classifies the communicative goal of the conversation turn."""
+    inc_lower = incoming_text.lower()
+    intent_lower = (user_intent or "").lower()
+
+    # 1. Greetings & "How are you?" status inquiry
+    status_triggers = [
+        "kaisa", "kaise", "kaisi", "how are you", "how r u", "wassup",
+        "what's up", "whats up", "kya haal", "haal chal", "sab thik", "sab theek"
+    ]
+    if any(trigger in inc_lower for trigger in status_triggers) and not user_intent:
+        return "greeting_status"
+
+    # 2. Availability / plans without confirmation
+    plans_triggers = ["mil raha", "milna", "free hai", "free h", "available", "kab mil", "chalega"]
+    if any(trigger in inc_lower for trigger in plans_triggers) and not user_intent:
+        return "plans_noncommittal"
+
+    # 3. Confirmation inquiry
+    confirm_triggers = ["ho gya", "hua kya", "kar diya", "bheja", "done?", "verify"]
+    if any(trigger in inc_lower for trigger in confirm_triggers):
+        return "affirmation"
+
+    # 4. Gratitude / thanks
+    thanks_triggers = ["thanks", "thank you", "thnx", "thx", "shukriya"]
+    if any(trigger in inc_lower for trigger in thanks_triggers):
+        return "thanks"
+
+    return "general"
+
+
+def retrieve_relevant_phrases(profile: StyleProfile, intent_category: str) -> List[str]:
+    """Retrieves authentic short phrases written by the user matching the communicative intent."""
+    if not profile:
+        return []
+
+    phrases = []
+    # Check intent_phrases first
+    if profile.intent_phrases and intent_category in profile.intent_phrases:
+        phrases.extend(profile.intent_phrases[intent_category][:4])
+
+    # Fallback to frequent short phrases if none found for category
+    if not phrases and profile.frequent_short_phrases:
+        # If greeting status, check for status words
+        if intent_category == "greeting_status":
+            for p in profile.frequent_short_phrases:
+                p_low = p.lower()
+                if any(w in p_low for w in ["thik", "theek", "mast", "badhiya", "ha", "chal"]):
+                    phrases.append(p)
+                    if len(phrases) >= 3:
+                        break
+
+    return phrases[:4]
+
+
+def apply_spelling_preferences(text: str, spelling_prefs: Dict[str, str]) -> str:
+    """
+    Deterministically transforms words to match the user's learned spelling conventions.
+    E.g. replaces 'theek' -> 'thik', 'hai' -> 'h', 'hoon' -> 'hu', 'nahi' -> 'nhi'.
+    Preserves capitalization of the original word.
+    """
+    if not spelling_prefs or not text:
+        return text
+
+    modified = text
+    for non_pref, pref in spelling_prefs.items():
+        # Match word boundaries case-insensitively
+        pattern = re.compile(r"\b" + re.escape(non_pref) + r"\b", re.IGNORECASE)
+
+        def _repl(match):
+            orig = match.group(0)
+            if orig.isupper():
+                return pref.upper()
+            elif orig[0].isupper() and len(orig) > 1:
+                return pref.capitalize()
+            return pref
+
+        modified = pattern.sub(_repl, modified)
+
+    return modified
+
+
+def build_system_prompt(profile: StyleProfile, intensity: str, incoming_text: str = "", user_intent: str = "") -> str:
     """
     Builds the system prompt instructing the model on response priority,
-    communicative intent, safety, anti-echo rules, and style guidance.
+    communicative intent, safety, anti-echo rules, and learned spelling preferences.
     """
+    intent_category = detect_intent_category(incoming_text, user_intent)
+    relevant_phrases = retrieve_relevant_phrases(profile, intent_category)
+
     # Capitalization instructions
     if profile.capitalization.primary_case == "all_lowercase":
-        case_instruction = "Use mostly lowercase letters (e.g., 'thik hu tu bata' or 'sounds good see you')."
+        case_instruction = "Use mostly lowercase letters (e.g. 'thik h tu bata' or 'chal thik h')."
     elif profile.capitalization.primary_case == "sentence_case":
         case_instruction = "Use standard sentence case capitalization."
     else:
@@ -86,11 +169,8 @@ def build_system_prompt(profile: StyleProfile, intensity: str) -> str:
 
     if profile.punctuation.question_freq > 0.4:
         punct_notes.append(
-            "You may include a natural follow-up question (e.g., 'tu bata?' or 'you?') AFTER answering first. Never ask a question instead of answering."
+            "You may include a natural follow-up question (e.g. 'tu bata?' or 'you?') AFTER answering first. Never ask a question instead of answering."
         )
-
-    if profile.punctuation.ellipsis_freq > 0.2:
-        punct_notes.append("Occasionally use ellipses ('...') for casual transitions.")
 
     punctuation_instruction = " ".join(punct_notes) if punct_notes else "Natural casual punctuation."
 
@@ -106,30 +186,49 @@ def build_system_prompt(profile: StyleProfile, intensity: str) -> str:
     else:
         emoji_instruction = "Do not use emojis unless naturally fitting."
 
-    # Slang & Vocabulary
-    if profile.slang_and_phrases:
-        slang_list = ", ".join(profile.slang_and_phrases[:15])
-        vocab_instruction = f"Incorporate natural colloquialisms and vocabulary from style when appropriate: {slang_list}."
-    else:
-        vocab_instruction = "Keep phrasing casual, natural, and conversational."
+    # Data-grounded spelling conventions
+    spelling_block = ""
+    if profile.spelling_preferences:
+        rules = []
+        for non_pref, pref in sorted(profile.spelling_preferences.items())[:12]:
+            rules.append(f"'{pref}' (never '{non_pref}')")
+        spelling_block = (
+            f"\n=== MANDATORY SPELLING CONVENTIONS FROM USER'S CHAT HISTORY ===\n"
+            f"The user specifically uses these exact Romanized spellings. You MUST adhere to them:\n"
+            f"- Use: {', '.join(rules)}.\n"
+            f"- Do NOT 'correct' or normalize the user's spellings to textbook Hindi (e.g. do not replace '{profile.spelling_preferences.get('hai', 'h')}' with 'hai' or '{profile.spelling_preferences.get('theek', 'thik')}' with 'theek').\n"
+        )
 
-    # Openers & closers
-    openers_str = ", ".join(profile.common_openers) if profile.common_openers else "none"
-    closers_str = ", ".join(profile.common_closers) if profile.common_closers else "none"
+    # Retrieved authentic user phrases
+    phrase_block = ""
+    if relevant_phrases:
+        formatted_phrases = "\n".join(f"- \"{p}\"" for p in relevant_phrases)
+        phrase_block = (
+            f"\n=== USER'S ACTUAL RECURRING PHRASES FOR THIS INTENT ===\n"
+            f"These are exact short phrases the user actually wrote in past chats for similar situations. Prefer using these exact phrases and rhythm:\n"
+            f"{formatted_phrases}\n"
+        )
+    elif profile.frequent_short_phrases:
+        formatted_phrases = "\n".join(f"- \"{p}\"" for p in profile.frequent_short_phrases[:5])
+        phrase_block = (
+            f"\n=== USER'S FREQUENT SHORT MESSAGES ===\n"
+            f"Short phrases the user regularly uses:\n"
+            f"{formatted_phrases}\n"
+        )
 
-    # Style samples (filter out any questions to avoid prompting the model to echo)
-    safe_samples = [s for s in profile.sample_snippets if not s.strip().endswith("?")][:4]
+    # Style samples (filter out questions)
+    safe_samples = [s for s in profile.sample_snippets if not s.strip().endswith("?")][:3]
     sample_block = ""
     if safe_samples:
         formatted_samples = "\n".join(f"- {s}" for s in safe_samples)
         sample_block = (
-            f"\nCADENCE EXAMPLES (For rhythm and tone ONLY — never copy verbatim, never override answering):\n{formatted_samples}"
+            f"\nCADENCE EXAMPLES (For rhythm and tone ONLY — never copy verbatim, never override answering):\n{formatted_samples}\n"
         )
 
     intensity_guidance = {
         "subtle": "Apply stylistic traits subtly. Prioritize clear, direct, and polite phrasing.",
         "moderate": "Balance stylistic habits naturally with direct answers.",
-        "strong": "Emphasize personal casual chat patterns, lowercase style, slang, and emojis closely.",
+        "strong": "Strictly emphasize the user's personal chat spellings, lowercase style, and slang.",
     }.get(intensity, "Balance stylistic habits naturally.")
 
     custom_notes_block = f"\nUser Custom Preferences: {profile.custom_notes}" if profile.custom_notes.strip() else ""
@@ -140,52 +239,27 @@ The drafts you produce will be reviewed, edited, and approved by the user before
 === PRIORITY 1: CORE RESPONSE TASK & COMMUNICATIVE INTENT ===
 1. FIRST-PERSON PERSPECTIVE: The incoming message was sent by the OTHER PERSON to the user. You are writing MY direct reply back to them.
 2. ANSWER DIRECTLY: Respond to the communicative intent of the incoming message:
-   - If they ask how you are (e.g. "kaisa hai?", "kaise ho?", "how are you?", "what's up?"):
-     Directly answer your state first (e.g. "thik hu", "mast hu", "all good", "doing well").
-   - When no specific intent or facts are supplied, provide a short, natural, neutral answer like "thik hu, tu bata" or "all good, what about you?".
+   - If they ask how you are (e.g. "kaisa hai?", "kaise ho bhai?", "kaisa h bhai?", "how are you?"):
+     Directly answer your state first (e.g. using the user's preferred spelling like "thik hu, tu bata", "thik h", "thik hu bhai", or "all good").
+   - When no specific intent or facts are supplied, provide a short, natural, neutral answer rather than repeating their question.
+   - For simple greetings, keep the reply very short (prefer 1 concise sentence, 2-6 words).
    - A brief reciprocal question (e.g. "tu bata?", "tu suna?", "you?") is allowed ONLY AFTER directly answering first.
 3. NEVER ECHO OR REPEAT:
    - Do NOT copy, translate, paraphrase, or ask the incoming question back as your reply.
-   - For example: if incoming is "kaisa hai bhai?", NEVER reply with "kaisa hai bhai?" or "kaisi hai?".
+   - For example: if incoming is "kaisa h bhai?", NEVER reply with "kaisa h bhai?" or "kaisi hai?" or "kya hua".
 4. NEVER INVENT FACTS:
    - Do NOT hallucinate personal plans, availability, promises, or commitments not specified in the intent.
-   - If asked about availability/plans and no facts are provided, answer with a concise clarification or safe noncommittal response (e.g., "kal ka pakka nahi hai, shaam ko batata hu" or "dekhna padega, kitne baje?").
+   - If asked about availability/plans (e.g. "kal mil raha hai?") and no facts are provided, answer with a concise clarification or safe noncommittal response (e.g., "kal ka pakka nahi hai abhi" or "kl ka pakka nahi h, shaam ko batata hu" or "dekhna padega, kitne baje?").
 5. LANGUAGE & DIALECT MATCHING:
-   - Always reply in the same language and dialect as the conversation (e.g., casual Hinglish for Hinglish, English for English, Hindi for Hindi).
-6. PROPORTIONAL LENGTH:
-   - For a simple greeting or "how are you?", keep the reply short (prefer 1 concise sentence, 3-8 words).
-7. STYLE MUST NOT OVERRIDE ANSWERING:
-   - Style profile informs tone, spelling, and emojis, but the primary job is to answer the message.
-
-=== FEW-SHOT EXAMPLES ===
-- Incoming: "kaise ho bhai?" | Intent: none
-  Good Reply: "thik hu, tu bata"
-  Bad Reply: "kaise ho bhai? kya chal raha hai?" (WRONG: echoes question instead of answering)
-
-- Incoming: "kaisa hai bhai?" | Intent: none
-  Good Reply: "mast hu bhai, tu suna"
-  Bad Reply: "kaisi hai? aur kya hua?" (WRONG: rephrases the incoming question)
-
-- Incoming: "kal mil raha hai?" | Intent: none (no availability info provided)
-  Good Reply: "kal ka pakka nahi hai abhi, shaam ko batata hu"
-  Bad Reply: "ha kal 5 baje milte hai cafe me" (WRONG: invented availability/plans)
-
-- Incoming: "Are you coming to the party tonight?" | Intent: "Yes, around 9pm"
-  Good Reply: "yeah will reach around 9pm!"
-  Bad Reply: "I want to convey that I will reach around 9pm" (WRONG: restating intent instruction)
-
-- Incoming: "How are you doing?" | Intent: none
-  Good Reply: "all good here, how about you?"
-  Bad Reply: "how are you doing today?" (WRONG: repeats incoming question)
-
+   - Always reply in the same language and dialect as the conversation (e.g., casual Hinglish for Hinglish, English for English).
+{spelling_block}{phrase_block}
 === PRIORITY 2: STYLE PROFILE GUIDANCE ===
+- Sender Profile: {profile.sender_name} ({profile.total_training_messages} messages analyzed, {profile.confidence_level} confidence)
 - Intensity: {intensity_guidance}
 - Capitalization: {case_instruction}
 - Punctuation: {punctuation_instruction}
 - Emojis: {emoji_instruction}
-- Vocabulary: {vocab_instruction}
-- Greetings / Openers (if initiating): {openers_str}
-- Sign-offs: {closers_str}{sample_block}{custom_notes_block}
+- Characteristic Vocabulary: {', '.join(profile.slang_and_phrases[:15]) if profile.slang_and_phrases else 'Casual WhatsApp phrasing'}{sample_block}{custom_notes_block}
 
 === OUTPUT FORMAT ===
 Output ONLY the requested draft reply options separated by delimiter headers.
@@ -194,45 +268,56 @@ Do not include any conversational preamble, quotes, explanations, or analysis.
     return prompt.strip()
 
 
-def build_user_prompt(request: DraftRequest) -> str:
+def build_user_prompt(request: DraftRequest, profile: Optional[StyleProfile] = None) -> str:
     """
     Builds the user turn prompt detailing incoming message, conversation history,
     optional intent, desired length, and number of draft options requested.
     """
     length_guidelines = {
-        "short": "Short (1 sentence or a quick 3-8 word response, typical for quick WhatsApp replies)",
+        "short": "Short (1 sentence or a quick 2-6 word response, typical for quick WhatsApp replies)",
         "medium": "Medium (1-2 sentences, natural chat conversational length)",
         "long": "Long (2-4 sentences, explanatory or detailed reply)",
     }.get(request.length_preference, "Medium (1-2 sentences)")
 
     history, incoming = extract_incoming_and_history(request.context)
-
-    # If incoming couldn't be extracted, use raw context
     target_incoming = incoming if incoming else request.context.strip()
-
     history_block = f"CONVERSATION HISTORY:\n{history}\n\n" if history else ""
+
+    # Check intent category
+    intent_category = detect_intent_category(target_incoming, request.intent)
 
     if request.intent and request.intent.strip():
         intent_block = f"""USER INTENT / FACTS TO CONVEY:
 {request.intent.strip()}
 (Express this meaning directly in my voice. Do NOT restate or quote this instruction)."""
     else:
-        intent_block = """USER INTENT:
-(None provided — this field is optional. Infer a direct, natural answer from the conversation context. For a greeting or 'how are you?', give a simple positive/neutral answer like 'thik hu' or 'all good', and optionally a brief reciprocal ask like 'tu bata?'. Do NOT invent specific plans, commitments, or unknown facts)."""
+        if intent_category == "greeting_status":
+            intent_block = """USER INTENT:
+(None provided — this field is optional. Answer how I am directly in 1 short sentence using my learned style/phrasing like 'thik h' or 'thik hu bhai', and optionally ask 'tu bata?'. Do NOT invent specific plans or facts)."""
+        else:
+            intent_block = """USER INTENT:
+(None provided — this field is optional. Infer a direct, natural answer from context. Do NOT invent specific plans, commitments, or unknown facts)."""
+
+    # Retrieved candidates hint
+    retrieved_hint = ""
+    if profile:
+        rel_phrases = retrieve_relevant_phrases(profile, intent_category)
+        if rel_phrases:
+            retrieved_hint = f"\nRELEVANT AUTHENTIC USER PHRASES TO FAVOR:\n" + "\n".join(f"- {p}" for p in rel_phrases) + "\n"
 
     num_drafts = request.num_drafts
 
     prompt = f"""{history_block}LATEST INCOMING MESSAGE (from other person to me):
 "{target_incoming}"
 
-{intent_block}
-
+{intent_block}{retrieved_hint}
 TARGET LENGTH: {length_guidelines}
 STYLE INTENSITY: {request.style_intensity}
 
 INSTRUCTIONS:
 Generate exactly {num_drafts} distinct draft reply options from my perspective answering the latest incoming message.
 Every option must directly ANSWER the other person; do not repeat, echo, or rephrase their question.
+Apply my exact learned spellings consistently across all options.
 Format your output strictly with delimiter headers like this:
 
 === DRAFT 1 ===
@@ -246,16 +331,22 @@ Do not output any markdown formatting, bullet points, numbering, or introductory
     return prompt.strip()
 
 
-def parse_draft_options(raw_output: str, expected_count: int, incoming_text: str = "") -> List[str]:
+def parse_draft_options(
+    raw_output: str,
+    expected_count: int,
+    incoming_text: str = "",
+    profile: Optional[StyleProfile] = None,
+) -> List[str]:
     """
     Parses the delimited draft options from the model's raw completion output.
-    Gracefully handles varying delimiters or non-standard formatting, and ensures
-    drafts do not merely echo the incoming message.
+    Applies deterministic spelling normalization from the user's profile,
+    filters out echoes, and ensures distinct, authentic replies.
     """
-    # Clean incoming text for comparison
+    if not raw_output or not raw_output.strip():
+        return ["Unable to generate draft. Please try again."]
+
     _, incoming_clean = extract_incoming_and_history(incoming_text) if incoming_text else ("", "")
 
-    # Match === DRAFT N === or --- DRAFT N --- or DRAFT N:
     pattern = re.compile(r"(?:===|---|###)?\s*DRAFT\s*\d+\s*(?:===|---|:)?", re.IGNORECASE)
     raw_drafts: List[str] = []
 
@@ -263,7 +354,6 @@ def parse_draft_options(raw_output: str, expected_count: int, incoming_text: str
         parts = pattern.split(raw_output)
         for part in parts:
             cleaned = part.strip()
-            # Remove any lingering quotes around the draft
             if cleaned.startswith('"') and cleaned.endswith('"'):
                 cleaned = cleaned[1:-1].strip()
             if cleaned.startswith("'") and cleaned.endswith("'"):
@@ -272,7 +362,6 @@ def parse_draft_options(raw_output: str, expected_count: int, incoming_text: str
             if cleaned and not cleaned.lower().startswith("here are") and not cleaned.lower().startswith("draft"):
                 raw_drafts.append(cleaned)
     else:
-        # Fallback: check for numbered lines (e.g. "1. Draft one\n2. Draft two")
         numbered_matches = re.split(r"(?:^|\n)\s*(?:\d+[\.\)]|Draft\s*\d+:?)\s*", raw_output.strip(), flags=re.IGNORECASE)
         numbered_candidates = [m.strip() for m in numbered_matches if m.strip()]
         if len(numbered_candidates) >= 2:
@@ -284,7 +373,9 @@ def parse_draft_options(raw_output: str, expected_count: int, incoming_text: str
                 if stripped:
                     raw_drafts.append(stripped)
 
-    # Filter out echoes, duplicates, and clean up
+    # Apply deterministic spelling preference transformation if profile exists
+    spelling_prefs = profile.spelling_preferences if profile else {}
+
     seen = set()
     filtered_drafts: List[str] = []
 
@@ -292,32 +383,39 @@ def parse_draft_options(raw_output: str, expected_count: int, incoming_text: str
         d_clean = d.strip()
         if not d_clean:
             continue
-        # Strip any meta headers like "Reply:" or "Me:"
         d_clean = re.sub(r"^(?:Me|Reply|Option\s*\d+):\s*", "", d_clean, flags=re.IGNORECASE).strip()
 
-        # Check for duplicate
+        # Apply deterministic spelling normalization
+        if spelling_prefs:
+            d_clean = apply_spelling_preferences(d_clean, spelling_prefs)
+
         key = d_clean.lower()
         if key in seen:
             continue
 
-        # Check if draft merely echoes the incoming question without answering
         if incoming_clean and is_echo_of_incoming(d_clean, incoming_clean):
             continue
 
         seen.add(key)
         filtered_drafts.append(d_clean)
 
-    # If all drafts were filtered out as echoes (rare edge case), provide a clean direct fallback
-    if not filtered_drafts and incoming_clean:
-        # If incoming is a greeting or 'kaisa hai'
-        lowered = incoming_clean.lower()
-        if any(w in lowered for w in ["kaisa", "kaise", "kaisi", "how are you", "wassup", "what's up", "whats up"]):
-            filtered_drafts = ["thik hu, tu bata"]
-        else:
-            filtered_drafts = [raw_output.strip()]
+    # If greeting status and drafts count is under expected_count, supplement with user's learned authentic phrase
+    if profile and incoming_clean and len(filtered_drafts) < expected_count:
+        intent_cat = detect_intent_category(incoming_clean)
+        if intent_cat == "greeting_status":
+            rel_phrases = retrieve_relevant_phrases(profile, intent_cat)
+            if rel_phrases:
+                top_phrase = rel_phrases[0]
+                if not any(top_phrase.lower() in d.lower() for d in filtered_drafts):
+                    filtered_drafts.append(top_phrase)
 
-    # If still empty, return the raw stripped output
-    if not filtered_drafts and raw_output.strip():
-        filtered_drafts = [raw_output.strip()]
+    # Fallback if all options were filtered
+    if not filtered_drafts:
+        if profile and profile.spelling_preferences:
+            fav_h = profile.spelling_preferences.get("hai", "h")
+            fav_thik = profile.spelling_preferences.get("theek", "thik")
+            filtered_drafts = [f"{fav_thik} {fav_h}, tu bata"]
+        else:
+            filtered_drafts = ["thik hu, tu bata"]
 
     return filtered_drafts[:expected_count]

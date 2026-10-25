@@ -102,7 +102,8 @@ class OllamaClient:
         system_prompt: str,
         user_prompt: str,
         model: Optional[str] = None,
-        temperature: float = 0.7,
+        temperature: float = 0.45,
+        max_tokens: Optional[int] = 120,
     ) -> str:
         """
         Sends chat completion request to POST /api/chat.
@@ -110,6 +111,15 @@ class OllamaClient:
         """
         target_model = model or self.config.model
         url = f"{self.base_url}/api/chat"
+
+        options: Dict[str, Any] = {
+            "temperature": temperature,
+            "repeat_penalty": 1.2,
+            "top_p": 0.85,
+        }
+        if max_tokens:
+            options["num_predict"] = max_tokens
+
         payload = {
             "model": target_model,
             "messages": [
@@ -117,11 +127,7 @@ class OllamaClient:
                 {"role": "user", "content": user_prompt},
             ],
             "stream": False,
-            "options": {
-                "temperature": temperature,
-                "repeat_penalty": 1.15,
-                "top_p": 0.9,
-            },
+            "options": options,
         }
 
         try:

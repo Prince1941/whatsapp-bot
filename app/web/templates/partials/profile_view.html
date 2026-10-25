@@ -14,7 +14,7 @@
   <div class="empty-state">
     <div class="empty-icon">🧬</div>
     <h3>No Style Profile Created Yet</h3>
-    <p>Upload your authorized WhatsApp chat export in the <strong>Import Chat</strong> tab to extract a personalized style profile.</p>
+    <p>Upload your authorized WhatsApp chat export in the <strong>Import Chat</strong> tab to extract your authentic writing style.</p>
     <div class="mt-3">
       <button class="btn btn-primary" onclick="switchTab('tab-import')">Go to Chat Import</button>
     </div>
@@ -24,24 +24,89 @@
     <!-- Profile Header -->
     <div class="profile-header-card">
       <div class="profile-title-area">
-        <h2 class="profile-name">{{ profile.profile_name }}</h2>
-        <div class="profile-meta">
-          <span>Learned from sender: <strong>{{ profile.sender_name }}</strong></span>
+        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+          <h2 class="profile-name">{{ profile.profile_name }}</h2>
+          {% if profile.confidence_level == 'high' %}
+            <span class="badge badge-success">✓ High Confidence Match</span>
+          {% elif profile.confidence_level == 'medium' %}
+            <span class="badge badge-accent">⚡ Moderate Confidence</span>
+          {% elif profile.confidence_level == 'low' %}
+            <span class="badge badge-error">⚠️ Low Confidence (Too Few Messages)</span>
+          {% else %}
+            <span class="badge badge-neutral">No Imported Data</span>
+          {% endif %}
+        </div>
+        <div class="profile-meta mt-1">
+          <span>Target Author: <strong>{{ profile.sender_name or 'Not set' }}</strong></span>
           <span>•</span>
-          <span>{{ profile.total_training_messages }} messages analyzed</span>
+          <span><strong>{{ profile.total_training_messages }}</strong> messages analyzed</span>
           <span>•</span>
           <span>{{ profile.created_at[:10] }}</span>
         </div>
+        {% if profile.confidence_description %}
+          <div class="text-muted mt-1" style="font-size: 0.8rem;">
+            {{ profile.confidence_description }}
+          </div>
+        {% endif %}
       </div>
       <div class="profile-actions">
+        <button class="btn btn-primary btn-sm" onclick="switchTab('tab-import')">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path></svg>
+          Rebuild / Import Chat
+        </button>
         <a href="/api/profile/export" class="btn btn-outline btn-sm" download>
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           Export JSON
         </a>
         <button class="btn btn-danger-outline btn-sm" hx-post="/api/profile/delete" hx-target="#profile-container" hx-confirm="Are you sure you want to delete this style profile?">
-          Delete Profile
+          Delete
         </button>
       </div>
+    </div>
+
+    <!-- Data-Grounded Spelling Preferences Card -->
+    <div class="panel-card mt-3">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Learned Romanized Spelling Preferences</h3>
+          <p class="card-subtitle">Exact spelling variants derived from your raw messages (e.g. "thik" vs "theek", "h" vs "hai"). These are enforced consistently across generated drafts.</p>
+        </div>
+        <span class="badge badge-success">{{ profile.spelling_preferences | length }} Active Rules</span>
+      </div>
+
+      {% if profile.spelling_preferences %}
+        <div class="tag-cloud mt-2">
+          {% for alt, pref in profile.spelling_preferences.items() %}
+            <span class="tag-chip" style="background: rgba(0, 168, 132, 0.15); border-color: rgba(0, 168, 132, 0.4); color: #fff;">
+              <strong>{{ pref }}</strong> <span style="opacity: 0.6; font-size: 0.75rem;">(instead of {{ alt }})</span>
+            </span>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-muted">No distinct spelling variant preferences detected yet. Import more messages to detect vocabulary habits.</p>
+      {% endif %}
+    </div>
+
+    <!-- Authentic Recurring Short Phrases Card -->
+    <div class="panel-card mt-3">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title">Authentic Recurring Short Phrases</h3>
+          <p class="card-subtitle">Your real conversational replies (1-6 words) extracted from your chat export. The model references these for natural small talk.</p>
+        </div>
+        <span class="badge badge-accent">{{ profile.frequent_short_phrases | length }} Phrases</span>
+      </div>
+
+      {% if profile.frequent_short_phrases %}
+        <div class="tag-cloud mt-2">
+          {% for phrase in profile.frequent_short_phrases %}
+            <span class="tag-chip" style="background: #202c33; color: #25d366; font-weight: 500;">
+              "{{ phrase }}"
+            </span>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-muted">No recurring short phrases indexed yet.</p>
+      {% endif %}
     </div>
 
     <!-- Style Characteristics Grid -->
@@ -53,9 +118,9 @@
         <div class="stat-detail">
           <span>Avg Chars: {{ profile.length_stats.avg_chars_per_message }}</span>
           <div class="mini-bar-group mt-1">
-            <span title="Short (<8 words): {{ (profile.length_stats.short_ratio * 100) | round }}%">Short: {{ (profile.length_stats.short_ratio * 100) | round }}%</span> ·
-            <span title="Medium (8-25 words): {{ (profile.length_stats.medium_ratio * 100) | round }}%">Med: {{ (profile.length_stats.medium_ratio * 100) | round }}%</span> ·
-            <span title="Long (>25 words): {{ (profile.length_stats.long_ratio * 100) | round }}%">Long: {{ (profile.length_stats.long_ratio * 100) | round }}%</span>
+            <span>Short: {{ (profile.length_stats.short_ratio * 100) | round }}%</span> ·
+            <span>Med: {{ (profile.length_stats.medium_ratio * 100) | round }}%</span> ·
+            <span>Long: {{ (profile.length_stats.long_ratio * 100) | round }}%</span>
           </div>
         </div>
       </div>
@@ -104,32 +169,6 @@
       </div>
     </div>
 
-    <!-- Slang and Characteristic Words -->
-    <div class="panel-card mt-3">
-      <h3 class="card-title">Characteristic Vocabulary & Slang</h3>
-      <p class="card-subtitle">Colloquial words, contractions, and distinctive informal terms detected in your chat:</p>
-      <div class="tag-cloud mt-2">
-        {% if profile.slang_and_phrases %}
-          {% for word in profile.slang_and_phrases %}
-            <span class="tag-chip">{{ word }}</span>
-          {% endfor %}
-        {% else %}
-          <span class="text-muted">Standard vocabulary detected.</span>
-        {% endif %}
-      </div>
-
-      <div class="form-row mt-3">
-        <div class="col-half">
-          <strong>Common Openers:</strong>
-          <span class="text-muted">{{ profile.common_openers | join(', ') if profile.common_openers else 'None detected' }}</span>
-        </div>
-        <div class="col-half">
-          <strong>Common Sign-offs:</strong>
-          <span class="text-muted">{{ profile.common_closers | join(', ') if profile.common_closers else 'None detected' }}</span>
-        </div>
-      </div>
-    </div>
-
     <!-- Curated Representative Samples -->
     <div class="panel-card mt-3">
       <div class="card-header">
@@ -164,14 +203,28 @@
 
         <div class="form-group">
           <label for="edit_custom_notes">
-            <strong>Custom Style Guidance / Behavior Rules</strong>
-            <span class="help-text">Give specific instructions (e.g. "Never be rude", "Keep messages ultra-brief", "Avoid too many exclamation marks").</span>
+            <strong>Custom Style Guidance / Directives</strong>
+            <span class="help-text">Give specific instructions (e.g. "Always keep replies short", "Use casual Hinglish").</span>
           </label>
           <textarea id="edit_custom_notes" name="custom_notes" rows="2" class="form-control">{{ profile.custom_notes }}</textarea>
         </div>
 
         <div class="form-group">
-          <label for="edit_slang">Slang & Vocabulary (comma-separated)</label>
+          <label for="edit_spelling">
+            <strong>Learned Spelling Rules</strong> (format: <code>alt=preferred</code>, separated by commas or lines)
+          </label>
+          <textarea id="edit_spelling" name="spelling_prefs_text" rows="2" class="form-control">{% for alt, pref in profile.spelling_preferences.items() %}{{ alt }}={{ pref }}{% if not loop.last %}, {% endif %}{% endfor %}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_phrases">
+            <strong>Frequent Short Phrases</strong> (one per line)
+          </label>
+          <textarea id="edit_phrases" name="phrases_text" rows="3" class="form-control">{{ profile.frequent_short_phrases | join('\n') }}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="edit_slang">Slang & Characteristic Words (comma-separated)</label>
           <input type="text" id="edit_slang" name="slang_csv" class="form-control" value="{{ profile.slang_and_phrases | join(', ') }}">
         </div>
 

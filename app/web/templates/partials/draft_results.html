@@ -5,6 +5,21 @@
     <div class="disclaimer-text">
       <strong>AI-GENERATED DRAFT — REVIEW BEFORE USE</strong>
       <p>This draft was generated locally with model <code>{{ result.model_used }}</code>. Check facts, tone, and intent carefully before sending.</p>
+      <div style="margin-top: 0.35rem; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+        {% if result.confidence_level == 'high' %}
+          <span class="badge badge-success" style="font-size: 0.72rem;">✓ High Confidence Style Match</span>
+        {% elif result.confidence_level == 'medium' %}
+          <span class="badge badge-accent" style="font-size: 0.72rem;">⚡ Moderate Style Match</span>
+        {% elif result.confidence_level == 'low' %}
+          <span class="badge badge-error" style="font-size: 0.72rem;">⚠️ Limited Training Data</span>
+        {% endif %}
+
+        {% if result.learned_phrases_applied %}
+          <span style="font-size: 0.75rem; color: #86efac;">
+            Applied authentic phrases: <strong>{{ result.learned_phrases_applied | join(', ') }}</strong>
+          </span>
+        {% endif %}
+      </div>
     </div>
   </div>
 

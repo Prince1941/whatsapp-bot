@@ -1,6 +1,6 @@
 import re
 from collections import Counter
-from typing import List, Set
+from typing import List, Set, Dict, Tuple
 from app.models import (
     ChatMessage,
     StyleProfile,
@@ -35,14 +35,45 @@ COMMON_SLANG_CANDIDATES = {
     "lit", "fam", "vibes", "afaik", "bcz", "coz", "ur", "u", "r"
 }
 
+# Known equivalent spelling clusters in Romanized Hinglish and casual messaging
+COMMON_SPELLING_GROUPS = [
+    ("thik", "theek", "teek", "thek"),
+    ("h", "hai", "he"),
+    ("hu", "hoon", "hun"),
+    ("nhi", "nahi", "ni", "nh"),
+    ("ha", "haan", "haa", "han"),
+    ("kr", "kar"),
+    ("kl", "kal"),
+    ("mai", "main"),
+    ("bhai", "bro", "bhaiya"),
+    ("kya", "kyaa"),
+    ("thnx", "thanks", "thx", "thankyou", "thnk u"),
+    ("rha", "raha"),
+    ("rhe", "rahe"),
+    ("rhi", "rahi"),
+    ("kuch", "kch"),
+    ("abhi", "abh"),
+    ("acha", "achha", "achaa"),
+    ("plz", "pls", "please"),
+    ("u", "you"),
+    ("ur", "your"),
+    ("whi", "wahi"),
+    ("kaha", "kahan"),
+    ("kidhar", "kidhr"),
+    ("sahi", "shi"),
+    ("bhej", "bhj"),
+    ("krte", "karte"),
+    ("krna", "karna"),
+]
+
 OPENER_CANDIDATES = {
     "hey", "yo", "hi", "hello", "morning", "gm", "evening", "sup", "whats up",
-    "what's up", "hola", "dear", "namaste"
+    "what's up", "hola", "dear", "namaste", "oyy", "oye", "abe", "bhai"
 }
 
 CLOSER_CANDIDATES = {
-    "cya", "bye", "see ya", "cheers", "good night", "gn", "ttyl", "take care",
-    "thanks", "thx", "talk soon", "later", "peace"
+    "cya", "bye", "see ya", "cheers", "good night", "gn", "goodnight", "ttyl",
+    "take care", "thanks", "thx", "thnx", "talk soon", "later", "peace"
 }
 
 STOPWORDS = {
@@ -57,7 +88,6 @@ STOPWORDS = {
 def extract_emojis(text: str) -> List[str]:
     """Extract individual emojis found in a text."""
     matches = EMOJI_PATTERN.findall(text)
-    # Flatten strings if multi-char cluster
     emojis: List[str] = []
     for match in matches:
         for char in match:
@@ -113,7 +143,6 @@ def analyze_capitalization(messages: List[ChatMessage]) -> CapitalizationStyle:
         if not text:
             continue
 
-        # Look at the first alphabetical character
         alpha_chars = [c for c in text if c.isalpha()]
         if not alpha_chars:
             continue
@@ -164,7 +193,6 @@ def analyze_punctuation(messages: List[ChatMessage]) -> PunctuationStats:
         ellipses += content.count("...")
         commas += content.count(",")
 
-        # Does the message end in a period?
         if content.endswith(".") and not content.endswith("..."):
             period_endings += 1
 
@@ -196,34 +224,160 @@ def analyze_emojis(messages: List[ChatMessage]) -> EmojiStats:
     return EmojiStats(emoji_frequency=freq, top_emojis=top)
 
 
+def extract_spelling_preferences(messages: List[ChatMessage]) -> Dict[str, str]:
+    """
+    Derives the user's empirical spelling preferences from raw message history.
+    Detects which variant of common Hinglish or informal word pairs the user actually uses.
+    Returns mapping from non-preferred variant -> preferred variant.
+    """
+    word_counter: Counter = Counter()
+    for msg in messages:
+        words = re.findall(r"\b[A-Za-z]+\b", msg.content.lower())
+        word_counter.update(words)
+
+    preferences: Dict[str, str] = {}
+
+    for group in COMMON_SPELLING_GROUPS:
+        # Find frequencies of each variant in this group
+        counts = {variant: word_counter[variant] for variant in group}
+        sorted_variants = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+        winner, win_count = sorted_variants[0]
+
+        # Only form a rule if the winner has at least 1 count and accounts for >= 60% of total
+        total_group_occurrences = sum(counts.values())
+        if win_count >= 1 and (win_count / total_group_occurrences) >= 0.6:
+            for variant, cnt in counts.items():
+                if variant != winner:
+                    preferences[variant] = winner
+
+    return preferences
+
+
+def extract_frequent_short_phrases(messages: List[ChatMessage], limit: int = 25) -> List[str]:
+    """
+    Extracts recurring short messages (1 to 6 words) authored by the user.
+    Preserves exact casing, contractions, and punctuation without pre-normalization.
+    """
+    phrase_counter: Counter = Counter()
+
+    for msg in messages:
+        raw = msg.content.strip()
+        words = raw.split()
+
+        # Focus on short conversational messages between 1 and 6 words
+        if 1 <= len(words) <= 6:
+            # Exclude PII, numbers, URLs, and WhatsApp technical notices
+            if "@" in raw or "http" in raw or any(c.isdigit() for c in raw):
+                continue
+            if "[REDACTED" in raw or "omitted" in raw.lower() or "deleted" in raw.lower():
+                continue
+            # Exclude standalone punctuation
+            clean_alnum = re.sub(r"[^\w]", "", raw)
+            if not clean_alnum:
+                continue
+
+            phrase_counter[raw] += 1
+
+    # Take phrases that appear at least once, prioritized by frequency
+    sorted_phrases = [phrase for phrase, _ in phrase_counter.most_common(limit)]
+    return sorted_phrases
+
+
+def categorize_intent_phrases(short_phrases: List[str], messages: List[ChatMessage]) -> Dict[str, List[str]]:
+    """
+    Categorizes the user's authentic short phrases into key communicative intents:
+    - greeting_status (e.g. 'thik h', 'mast hu', 'chal thik h')
+    - affirmation (e.g. 'ha', 'kar diye', 'done')
+    - negation (e.g. 'nhi', 'nahi')
+    - thanks (e.g. 'thnx bhai', 'thnk u')
+    - plans_noncommittal (e.g. 'kl batata hu', 'ruk')
+    """
+    intent_map: Dict[str, List[str]] = {
+        "greeting_status": [],
+        "affirmation": [],
+        "negation": [],
+        "thanks": [],
+        "plans_noncommittal": [],
+    }
+
+    # Helper keywords for intent grouping
+    status_keywords_priority = {"thik", "theek", "mast", "badhiya", "sahi", "hu", "hoon"}
+    status_keywords_general = {"good", "fine"}
+    affirmation_keywords = {"ha", "haa", "haan", "kar", "kr", "diye", "done", "yes", "ok", "chal"}
+    negation_keywords = {"nhi", "nahi", "nah", "no", "mat"}
+    thanks_keywords = {"thnx", "thanks", "thx", "thnk", "shukriya"}
+    plans_keywords = {"ruk", "kl", "kal", "dekh", "baad", "shaam", "bhejta"}
+
+    priority_status = []
+    general_status = []
+
+    for p in short_phrases:
+        p_lower = p.lower()
+        words = set(re.findall(r"\b[A-Za-z]+\b", p_lower))
+
+        if words & status_keywords_priority:
+            if p not in priority_status:
+                priority_status.append(p)
+        elif words & status_keywords_general:
+            if p not in general_status:
+                general_status.append(p)
+
+        if words & affirmation_keywords:
+            if p not in intent_map["affirmation"]:
+                intent_map["affirmation"].append(p)
+
+        if words & negation_keywords:
+            if p not in intent_map["negation"]:
+                intent_map["negation"].append(p)
+
+        if words & thanks_keywords:
+            if p not in intent_map["thanks"]:
+                intent_map["thanks"].append(p)
+
+        if words & plans_keywords:
+            if p not in intent_map["plans_noncommittal"]:
+                intent_map["plans_noncommittal"].append(p)
+
+    intent_map["greeting_status"] = priority_status + general_status
+    return intent_map
+
+
+def compute_confidence(total_messages: int) -> Tuple[str, str]:
+    """Honest reporting of style match confidence based on analyzed data size."""
+    if total_messages == 0:
+        return "none", "No messages imported. Using default neutral style."
+    elif total_messages < 20:
+        return "low", f"Limited confidence (only {total_messages} messages analyzed). Real style may differ."
+    elif total_messages < 100:
+        return "medium", f"Moderate confidence ({total_messages} messages analyzed)."
+    else:
+        return "high", f"High confidence ({total_messages:,} messages analyzed from your export)."
+
+
 def extract_vocabulary_and_slang(messages: List[ChatMessage]) -> List[str]:
     """Find recurrent slang, contractions, and distinctive informal terms."""
     word_counter: Counter = Counter()
 
     for msg in messages:
-        # Tokenize words, removing punctuation
         clean_text = re.sub(r"[^\w\s']", " ", msg.content.lower())
         tokens = clean_text.split()
         word_counter.update(tokens)
 
     detected: Set[str] = set()
 
-    # 1. Match against known slang candidates that appear at least once
     for candidate in COMMON_SLANG_CANDIDATES:
         if word_counter[candidate] > 0:
             detected.add(candidate)
 
-    # 2. Add high-frequency distinctive words (appear >= 3 times, not stopwords)
     for word, count in word_counter.most_common(30):
-        if len(word) >= 3 and word not in STOPWORDS and count >= 3:
+        if len(word) >= 2 and word not in STOPWORDS and count >= 3:
             if not word.isdigit():
                 detected.add(word)
 
-    # Return top 15 distinctive terms
-    return sorted(list(detected))[:15]
+    return sorted(list(detected))[:20]
 
 
-def extract_openers_and_closers(messages: List[ChatMessage]) -> tuple[List[str], List[str]]:
+def extract_openers_and_closers(messages: List[ChatMessage]) -> Tuple[List[str], List[str]]:
     """Detect typical greeting words and sign-offs."""
     openers: Counter = Counter()
     closers: Counter = Counter()
@@ -251,26 +405,23 @@ def extract_openers_and_closers(messages: List[ChatMessage]) -> tuple[List[str],
 def select_safe_sample_snippets(messages: List[ChatMessage], limit: int = 4) -> List[str]:
     """
     Selects a few short, generic, non-PII representative messages.
-    Does not include messages with redaction tags, numbers, URLs, or long text.
+    Does not include messages with redaction tags, numbers, URLs, questions, or long text.
     """
     candidates = []
 
     for msg in messages:
         content = msg.content.strip()
         words = content.split()
-        # Ideal short example is 3 to 10 words
-        if 3 <= len(words) <= 10:
-            # Check for absence of redactions, digits, or suspicious characters
+        if 2 <= len(words) <= 8:
             if "[REDACTED" in content or any(c.isdigit() for c in content):
                 continue
             if "http" in content.lower() or "@" in content:
                 continue
-            # Avoid questions in sample snippets so the model is not biased to echo questions
+            # Avoid questions so model does not echo questions
             if "?" in content:
                 continue
             candidates.append(content)
 
-    # Return unique snippets up to limit
     seen = set()
     unique_snippets = []
     for cand in candidates:
@@ -298,15 +449,26 @@ def build_style_profile(
     openers, closers = extract_openers_and_closers(messages)
     samples = select_safe_sample_snippets(messages)
 
+    # Data-grounded spellings and frequent phrases
+    spelling_prefs = extract_spelling_preferences(messages)
+    frequent_phrases = extract_frequent_short_phrases(messages)
+    intent_phrases = categorize_intent_phrases(frequent_phrases, messages)
+    conf_level, conf_desc = compute_confidence(len(messages))
+
     return StyleProfile(
         id="default",
         profile_name=profile_name,
         sender_name=sender_name,
         total_training_messages=len(messages),
+        confidence_level=conf_level,
+        confidence_description=conf_desc,
         length_stats=length_stats,
         capitalization=capitalization,
         punctuation=punctuation,
         emojis=emojis,
+        spelling_preferences=spelling_prefs,
+        frequent_short_phrases=frequent_phrases,
+        intent_phrases=intent_phrases,
         slang_and_phrases=slang,
         common_openers=openers,
         common_closers=closers,

@@ -249,6 +249,8 @@ async def update_profile(
     slang_csv: str = Form(""),
     emojis_str: str = Form(""),
     snippets_text: str = Form(""),
+    spelling_prefs_text: str = Form(""),
+    phrases_text: str = Form(""),
 ):
     """Allows manual editing of profile parameters."""
     profile = storage.get_profile()
@@ -272,6 +274,20 @@ async def update_profile(
     # Parse sample snippets
     snippets = [line.strip() for line in snippets_text.splitlines() if line.strip()]
     profile.sample_snippets = snippets
+
+    # Parse spelling preferences: "theek=thik, hai=h, hoon=hu" or newline separated
+    new_prefs = {}
+    for item in re.split(r"[,\n]", spelling_prefs_text):
+        if "=" in item:
+            k, v = item.split("=", 1)
+            if k.strip() and v.strip():
+                new_prefs[k.strip().lower()] = v.strip().lower()
+    profile.spelling_preferences = new_prefs
+
+    # Parse frequent phrases
+    phrases = [line.strip() for line in phrases_text.splitlines() if line.strip()]
+    if phrases:
+        profile.frequent_short_phrases = phrases
 
     storage.save_profile(profile)
 
@@ -342,25 +358,51 @@ async def draft_replies(
             custom_notes="Casual, friendly WhatsApp reply.",
         )
 
-    # Construct prompts
-    system_prompt = build_system_prompt(profile, draft_req.style_intensity)
-    user_prompt = build_user_prompt(draft_req)
+    # Construct prompts with data-grounded spelling and retrieval
+    system_prompt = build_system_prompt(
+        profile,
+        draft_req.style_intensity,
+        incoming_text=draft_req.context,
+        user_intent=draft_req.intent or "",
+    )
+    user_prompt = build_user_prompt(draft_req, profile=profile)
 
     client = get_ollama_client()
     target_model = draft_req.model_name or client.config.model
 
     try:
+        # Conservative token and temperature settings for short chat replies
+        max_tokens = 60 if draft_req.length_preference == "short" else 140
+        temp = 0.4 if draft_req.length_preference == "short" else 0.55
+
         raw_output = await client.generate_chat(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=target_model,
+            temperature=temp,
+            max_tokens=max_tokens,
         )
 
-        drafts = parse_draft_options(raw_output, draft_req.num_drafts, incoming_text=draft_req.context)
+        drafts = parse_draft_options(
+            raw_output,
+            draft_req.num_drafts,
+            incoming_text=draft_req.context,
+            profile=profile,
+        )
+
+        # Track which authentic learned phrases were applied
+        applied = []
+        if profile and profile.frequent_short_phrases:
+            for p in profile.frequent_short_phrases:
+                for d in drafts:
+                    if p.lower() in d.lower() and p not in applied:
+                        applied.append(p)
 
         response_data = DraftResponse(
             drafts=drafts,
             model_used=target_model,
+            confidence_level=profile.confidence_level,
+            learned_phrases_applied=applied[:3],
         )
 
         return templates.TemplateResponse(

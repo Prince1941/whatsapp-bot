@@ -67,10 +67,15 @@ class StyleProfile(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     sender_name: str = ""
     total_training_messages: int = 0
+    confidence_level: Literal["high", "medium", "low", "none"] = "none"
+    confidence_description: str = ""
     length_stats: LengthStats = Field(default_factory=LengthStats)
     capitalization: CapitalizationStyle = Field(default_factory=CapitalizationStyle)
     punctuation: PunctuationStats = Field(default_factory=PunctuationStats)
     emojis: EmojiStats = Field(default_factory=EmojiStats)
+    spelling_preferences: Dict[str, str] = Field(default_factory=dict)  # standard/alt -> user_preferred
+    frequent_short_phrases: List[str] = Field(default_factory=list)  # recurring real short phrases
+    intent_phrases: Dict[str, List[str]] = Field(default_factory=dict)  # intent_category -> phrases
     slang_and_phrases: List[str] = Field(default_factory=list)
     common_openers: List[str] = Field(default_factory=list)
     common_closers: List[str] = Field(default_factory=list)
@@ -92,6 +97,8 @@ class DraftResponse(BaseModel):
     """Response containing generated reply options."""
     drafts: List[str]
     model_used: str
+    confidence_level: str = "none"
+    learned_phrases_applied: List[str] = Field(default_factory=list)
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     disclaimer: str = "AI-generated draft — review and approve before sending"
 
