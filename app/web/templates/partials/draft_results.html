@@ -6,6 +6,18 @@
       <strong>AI-GENERATED DRAFT — REVIEW BEFORE USE</strong>
       <p>This draft was generated locally with model <code>{{ result.model_used }}</code>. Check facts, tone, and intent carefully before sending.</p>
       <div style="margin-top: 0.35rem; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+        {% if result.detected_intent %}
+          <span class="badge badge-info" style="font-size: 0.72rem; background: #3b82f6; color: white;">🎯 Intent: {{ result.detected_intent.replace('_', ' ') | title }}</span>
+        {% endif %}
+
+        {% if result.language_script_used %}
+          <span class="badge" style="font-size: 0.72rem; background: #6366f1; color: white;">🌐 Script: {{ result.language_script_used | title }}</span>
+        {% endif %}
+
+        {% if result.is_cloud %}
+          <span class="badge badge-warning" style="font-size: 0.72rem; background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid #ef4444;">☁️ Cloud API Active (PII Masked)</span>
+        {% endif %}
+
         {% if result.confidence_level == 'high' %}
           <span class="badge badge-success" style="font-size: 0.72rem;">✓ High Confidence Style Match</span>
         {% elif result.confidence_level == 'medium' %}
@@ -20,8 +32,19 @@
           </span>
         {% endif %}
       </div>
+      {% if result.retrieved_examples %}
+        <details style="margin-top: 0.5rem; font-size: 0.78rem; color: #94a3b8;">
+          <summary style="cursor: pointer; color: #38bdf8;">View {{ result.retrieved_examples | length }} retrieved past chat exchanges</summary>
+          <ul style="margin: 0.35rem 0 0 1rem; padding: 0;">
+            {% for ex in result.retrieved_examples %}
+              <li>{{ ex }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% endif %}
     </div>
   </div>
+
 
   {% if result.needs_user_input %}
     <div class="alert alert-warning mt-3" style="border-left: 4px solid #f59e0b; padding: 1rem; background: rgba(245, 158, 11, 0.15); color: #fef08a; border-radius: 6px;">

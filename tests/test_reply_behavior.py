@@ -1,4 +1,5 @@
 import pytest
+import re
 import httpx
 from unittest.mock import patch, AsyncMock
 from app.web.main import app
@@ -466,16 +467,20 @@ async def test_padh_liya_three_intents_produce_concise_styled_answers(temp_db):
                 resp = await ac.post("/api/draft", data=data)
                 assert resp.status_code == 200
 
+                # Extract draft text from draft cards to verify generated drafts specifically
+                draft_texts = re.findall(r'<textarea[^>]*>(.*?)</textarea>', resp.text, re.DOTALL)
+                combined_drafts = " ".join(draft_texts)
+
                 # Must not contain textbook unlearned spelling
                 if "haan" in intent_input:
-                    assert "haan" not in resp.text
+                    assert "haan" not in combined_drafts
                 if "nahi" in intent_input:
-                    assert "nahi" not in resp.text
+                    assert "nahi" not in combined_drafts
                 if " hai" in intent_input:
-                    assert " hai" not in resp.text
+                    assert " hai" not in combined_drafts
 
                 # Must contain the user's concise styled version
-                assert expected_core in resp.text
+                assert expected_core in combined_drafts
 
 
 @pytest.mark.asyncio

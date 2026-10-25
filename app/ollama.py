@@ -1,6 +1,10 @@
+import json
+import logging
 import httpx
 from typing import List, Optional, Dict, Any
 from app.models import OllamaStatus, OllamaConfig
+
+logger = logging.getLogger("app.ollama")
 
 
 class OllamaError(Exception):
@@ -102,8 +106,11 @@ class OllamaClient:
         system_prompt: str,
         user_prompt: str,
         model: Optional[str] = None,
-        temperature: float = 0.45,
-        max_tokens: Optional[int] = 120,
+        temperature: float = 0.65,
+        max_tokens: Optional[int] = 160,
+        format_json: bool = False,
+        top_p: float = 0.9,
+        repeat_penalty: float = 1.1,
     ) -> str:
         """
         Sends chat completion request to POST /api/chat.
@@ -114,13 +121,13 @@ class OllamaClient:
 
         options: Dict[str, Any] = {
             "temperature": temperature,
-            "repeat_penalty": 1.2,
-            "top_p": 0.85,
+            "repeat_penalty": repeat_penalty,
+            "top_p": top_p,
         }
         if max_tokens:
             options["num_predict"] = max_tokens
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": target_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -128,11 +135,22 @@ class OllamaClient:
             ],
             "stream": False,
             "options": options,
+            "keep_alive": "15m",
         }
+        if format_json:
+            payload["format"] = "json"
+
+        # Console and Logger diagnostics
+        logger.info("[OLLAMA REQUEST] POST %s | Model: %s", url, target_model)
+        print(f"\n[OLLAMA REQUEST] POST {url} | Model: {target_model} | Keep-Alive: 15m")
+        print(f"[OLLAMA PAYLOAD] {json.dumps(payload, indent=2)}\n")
 
         try:
             async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
                 resp = await client.post(url, json=payload)
+
+                print(f"[OLLAMA RESPONSE {resp.status_code}] {resp.text[:500]}\n")
+                logger.info("[OLLAMA RESPONSE %s] %s", resp.status_code, resp.text[:500])
 
                 if resp.status_code == 404:
                     err_msg = resp.text
@@ -155,15 +173,22 @@ class OllamaClient:
                 return message_content
 
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
-            raise OllamaConnectionError(
+            err = OllamaConnectionError(
                 f"Cannot connect to Ollama at '{self.base_url}'. "
                 "Ensure Ollama is running locally ('ollama serve')."
-            ) from e
+            )
+            print(f"[OLLAMA CONNECTION ERROR] {err}")
+            raise err from e
         except httpx.TimeoutException as e:
-            raise OllamaTimeoutError(
+            err = OllamaTimeoutError(
                 f"Ollama took longer than {self.config.timeout_seconds}s to respond for model '{target_model}'."
-            ) from e
-        except OllamaError:
+            )
+            print(f"[OLLAMA TIMEOUT ERROR] {err}")
+            raise err from e
+        except OllamaError as e:
+            print(f"[OLLAMA ERROR] {e}")
             raise
         except Exception as e:
-            raise OllamaResponseError(f"Unexpected error calling Ollama: {str(e)}") from e
+            err = OllamaResponseError(f"Unexpected error calling Ollama: {str(e)}")
+            print(f"[OLLAMA UNEXPECTED ERROR] {err}")
+            raise err from e

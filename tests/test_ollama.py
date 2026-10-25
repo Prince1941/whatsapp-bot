@@ -17,7 +17,7 @@ async def test_ollama_healthcheck_success():
 
     mock_resp = httpx.Response(
         status_code=200,
-        json={"models": [{"name": "llama3.2:latest"}, {"name": "mistral:latest"}]},
+        json={"models": [{"name": "qwen2.5:7b"}, {"name": "mistral:latest"}]},
         request=httpx.Request("GET", "http://localhost:11434/api/tags"),
     )
 
@@ -25,7 +25,7 @@ async def test_ollama_healthcheck_success():
         mock_get.return_value = mock_resp
         status = await client.check_health()
         assert status.is_connected is True
-        assert "llama3.2:latest" in status.available_models
+        assert "qwen2.5:7b" in status.available_models
         assert "mistral:latest" in status.available_models
         assert status.error_message is None
 
@@ -44,7 +44,7 @@ async def test_ollama_healthcheck_offline():
 
 @pytest.mark.asyncio
 async def test_generate_chat_success():
-    client = OllamaClient(OllamaConfig(model="llama3.2"))
+    client = OllamaClient(OllamaConfig(model="qwen2.5:7b"))
 
     mock_resp = httpx.Response(
         status_code=200,

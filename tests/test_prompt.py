@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from app.models import (
     StyleProfile,
     DraftRequest,
@@ -163,3 +167,24 @@ def test_parse_draft_options_numbered_fallback():
     assert len(drafts) == 2
     assert drafts[0] == "thik hu, tu bata"
     assert drafts[1] == "mast hu bhai, tu suna"
+
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+    tests = [
+        test_build_system_prompt_rules,
+        test_extract_incoming_and_history,
+        test_build_user_prompt_with_blank_intent,
+        test_build_user_prompt_with_explicit_intent,
+        test_is_echo_of_incoming,
+        test_parse_draft_options_delimited,
+        test_parse_draft_options_filters_incoming_echoes,
+        test_parse_draft_options_numbered_fallback,
+    ]
+    for t in tests:
+        t()
+        print(f"PASS: {t.__name__}")
+    print(f"\nAll {len(tests)} tests in test_prompt.py passed successfully!")

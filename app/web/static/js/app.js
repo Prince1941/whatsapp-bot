@@ -129,3 +129,14 @@ async function confirmPurge() {
     alert('Error purging data: ' + err.message);
   }
 }
+
+// One-time client migration: clear any stale cached references to llama3.2
+try {
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    const val = localStorage.getItem(key);
+    if (val && typeof val === 'string' && val.toLowerCase().includes('llama3.2')) {
+      localStorage.removeItem(key);
+    }
+  }
+} catch (e) {}

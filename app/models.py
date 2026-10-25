@@ -83,6 +83,17 @@ class StyleProfile(BaseModel):
     custom_notes: str = ""
 
 
+class ChatPair(BaseModel):
+    """Represents an authentic (incoming_message -> user_reply) exchange pair."""
+    id: Optional[int] = None
+    profile_id: str = "default"
+    incoming: str
+    reply: str
+    other_sender: Optional[str] = None
+    timestamp_str: Optional[str] = None
+    similarity_score: Optional[float] = None
+
+
 class DraftRequest(BaseModel):
     """Input payload to draft replies."""
     context: str = Field(..., description="Received message or conversation thread")
@@ -91,6 +102,8 @@ class DraftRequest(BaseModel):
     style_intensity: Literal["subtle", "moderate", "strong"] = "moderate"
     num_drafts: int = Field(default=2, ge=1, le=5)
     model_name: Optional[str] = None
+    provider: Optional[str] = "ollama"  # "ollama", "gemini", "groq", "openai"
+    language_script: Literal["auto", "hinglish", "devanagari", "english"] = "auto"
 
 
 class DraftResponse(BaseModel):
@@ -99,17 +112,29 @@ class DraftResponse(BaseModel):
     model_used: str
     confidence_level: str = "none"
     learned_phrases_applied: List[str] = Field(default_factory=list)
+    detected_intent: Optional[str] = None
+    retrieved_examples: List[str] = Field(default_factory=list)
     needs_user_input: bool = False
     user_input_prompt: Optional[str] = None
+    is_cloud: bool = False
+    language_script_used: Optional[str] = None
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     disclaimer: str = "AI-generated draft — review and approve before sending"
+
+
+class ProviderConfig(BaseModel):
+    """Configuration for LLM provider."""
+    provider: Literal["ollama", "gemini", "groq", "openai"] = "ollama"
+    model: str = "qwen2.5:7b"
+    api_key_env_var: Optional[str] = None
+    is_cloud: bool = False
 
 
 class OllamaConfig(BaseModel):
     """Ollama connection configuration."""
     base_url: str = "http://localhost:11434"
-    model: str = "llama3.2"
-    timeout_seconds: float = 60.0
+    model: str = "qwen2.5:7b"
+    timeout_seconds: float = 120.0
 
 
 class OllamaStatus(BaseModel):
@@ -117,3 +142,4 @@ class OllamaStatus(BaseModel):
     is_connected: bool
     available_models: List[str] = Field(default_factory=list)
     error_message: Optional[str] = None
+

@@ -1,9 +1,10 @@
 import sqlite3
+import struct
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from app.config import config
-from app.models import StyleProfile, PrivacyFilterConfig, OllamaConfig
+from app.models import StyleProfile, PrivacyFilterConfig, OllamaConfig, ChatPair
 
 
 class Storage:
@@ -54,7 +55,34 @@ class Storage:
                 )
                 """
             )
+            # 4. Table for few-shot chat pairs and embeddings
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_pairs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id TEXT NOT NULL,
+                    incoming TEXT NOT NULL,
+                    reply TEXT NOT NULL,
+                    other_sender TEXT,
+                    timestamp_str TEXT,
+                    embedding_blob BLOB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chat_pairs_profile ON chat_pairs(profile_id)"
+            )
+            # One-time migration: clear any stale llama3.2 saved models from database
+            cursor.execute("SELECT value FROM app_settings WHERE key = 'ollama_model'")
+            stale_model_row = cursor.fetchone()
+            if stale_model_row and "llama3.2" in str(stale_model_row[0]).lower():
+                cursor.execute(
+                    "UPDATE app_settings SET value = ? WHERE key = 'ollama_model'",
+                    (config.default_ollama_model,),
+                )
             conn.commit()
+
 
     def save_profile(self, profile: StyleProfile):
         """Saves or updates a style profile in SQLite."""
@@ -114,6 +142,9 @@ class Storage:
         """Loads configured Ollama settings or defaults."""
         url = self.get_setting("ollama_base_url", config.default_ollama_url) or config.default_ollama_url
         model = self.get_setting("ollama_model", config.default_ollama_model) or config.default_ollama_model
+        if "llama3.2" in model.lower():
+            model = config.default_ollama_model
+            self.set_setting("ollama_model", model)
         timeout_str = self.get_setting("ollama_timeout", str(config.default_timeout_seconds))
         timeout = float(timeout_str) if timeout_str else config.default_timeout_seconds
         return OllamaConfig(base_url=url, model=model, timeout_seconds=timeout)
@@ -156,6 +187,67 @@ class Storage:
             cursor.execute("DELETE FROM imported_messages")
             conn.commit()
 
+    def save_chat_pairs(self, profile_id: str, pairs_with_embeddings: List[Tuple[ChatPair, Optional[List[float]]]]):
+        """Saves chat pairs and their vector embeddings."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            for pair, vec in pairs_with_embeddings:
+                blob = None
+                if vec:
+                    blob = struct.pack(f"{len(vec)}f", *vec)
+                cursor.execute(
+                    """
+                    INSERT INTO chat_pairs (profile_id, incoming, reply, other_sender, timestamp_str, embedding_blob)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (profile_id, pair.incoming, pair.reply, pair.other_sender, pair.timestamp_str, blob),
+                )
+            conn.commit()
+
+    def get_chat_pairs(self, profile_id: str = "default") -> List[Tuple[ChatPair, Optional[List[float]]]]:
+        """Retrieves all chat pairs and unpacked embeddings for a given profile."""
+        results = []
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, profile_id, incoming, reply, other_sender, timestamp_str, embedding_blob
+                FROM chat_pairs WHERE profile_id = ?
+                """,
+                (profile_id,),
+            )
+            for row in cursor.fetchall():
+                pair = ChatPair(
+                    id=row["id"],
+                    profile_id=row["profile_id"],
+                    incoming=row["incoming"],
+                    reply=row["reply"],
+                    other_sender=row["other_sender"],
+                    timestamp_str=row["timestamp_str"],
+                )
+                blob = row["embedding_blob"]
+                vec = None
+                if blob:
+                    count = len(blob) // 4
+                    vec = list(struct.unpack(f"{count}f", blob))
+                results.append((pair, vec))
+        return results
+
+    def delete_chat_pairs(self, profile_id: str = "default"):
+        """Deletes all chat pairs for a given profile."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM chat_pairs WHERE profile_id = ?", (profile_id,))
+            conn.commit()
+
+    def count_chat_pairs(self, profile_id: str = "default") -> int:
+        """Returns the number of indexed chat pairs."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM chat_pairs WHERE profile_id = ?", (profile_id,))
+            row = cursor.fetchone()
+            return row[0] if row else 0
+
     def purge_all_data(self):
         """
         Permanently purges all profiles, settings, and stored messages.
@@ -166,8 +258,10 @@ class Storage:
             cursor.execute("DELETE FROM style_profiles")
             cursor.execute("DELETE FROM app_settings")
             cursor.execute("DELETE FROM imported_messages")
+            cursor.execute("DELETE FROM chat_pairs")
             conn.commit()
 
 
 # Default singleton instance
 storage = Storage()
+

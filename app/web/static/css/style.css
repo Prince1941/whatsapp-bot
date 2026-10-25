@@ -130,6 +130,17 @@ body {
   box-shadow: 0 0 8px #ef4444;
 }
 
+.status-warning {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.status-warning .status-dot {
+  background-color: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+}
+
 .status-loading .status-dot {
   background-color: #eab308;
   animation: pulse 1.5s infinite;

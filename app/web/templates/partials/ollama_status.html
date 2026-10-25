@@ -1,14 +1,23 @@
-{% if ollama_status.is_connected %}
-  <div class="status-badge status-connected" title="Ollama connected: {{ ollama_status.available_models | length }} models found">
+{% if not ollama_status.is_connected %}
+  <div class="status-badge status-disconnected" title="{{ ollama_status.error_message or 'Ollama not running. Start with: ollama serve' }}">
     <span class="status-dot"></span>
-    <strong>Ollama Active</strong> ({{ ollama_cfg.model }})
+    <strong>Ollama not running</strong>
+  </div>
+{% elif model_not_found %}
+  <div class="status-badge status-warning" title="Model '{{ ollama_cfg.model }}' is not installed in local Ollama.">
+    <span class="status-dot"></span>
+    <strong>Model not found: {{ ollama_cfg.model }}</strong>
   </div>
 {% else %}
-  <div class="status-badge status-disconnected" title="{{ ollama_status.error_message }}">
+  <div class="status-badge status-connected" title="Ollama connected: {{ ollama_cfg.model }} ready ({{ ollama_status.available_models | length }} installed)">
     <span class="status-dot"></span>
-    <strong>Ollama Offline</strong>
+    <strong>Ollama Active ({{ ollama_cfg.model }})</strong>
   </div>
 {% endif %}
-{% if saved_message %}
+{% if warning_message %}
+  <span class="badge badge-warning ml-2" style="font-size: 0.78rem; background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b;">
+    ⚠️ {{ warning_message }}
+  </span>
+{% elif saved_message %}
   <span class="text-success ml-2" style="font-size: 0.85rem;">{{ saved_message }}</span>
 {% endif %}
