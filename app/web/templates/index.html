@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-tabs">
+  <button class="tab-btn active" onclick="switchTab('tab-draft')">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+    Draft Replies
+  </button>
+  <button class="tab-btn" onclick="switchTab('tab-import')">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+    Import Chat
+  </button>
+  <button class="tab-btn" onclick="switchTab('tab-profile')">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>
+    Style Profile
+  </button>
+  <button class="tab-btn" onclick="switchTab('tab-settings')">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    Settings & Privacy
+  </button>
+</div>
+
+<!-- ========================================== -->
+<!-- TAB 1: DRAFT REPLIES (DEFAULT VIEW)        -->
+<!-- ========================================== -->
+<div id="tab-draft" class="tab-panel active">
+  <div class="grid-2col">
+    <!-- Left: Inputs -->
+    <div class="panel-card">
+      <div class="card-header">
+        <h2 class="card-title">Compose Reply Draft</h2>
+        <span class="badge badge-accent">Human Review Required</span>
+      </div>
+
+      <form id="draft-form" hx-post="/api/draft" hx-target="#draft-results-container" hx-indicator="#draft-loading">
+        <div class="form-group">
+          <label for="context-input">
+            <strong>Received Message / Conversation Context</strong>
+            <span class="help-text">Paste the message you received or the recent conversation snippet.</span>
+          </label>
+          <textarea id="context-input" name="context" rows="4" class="form-control" placeholder="e.g. Alex: Hey are we still on for the movie tomorrow night? What time works for you?" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="intent-input">
+            <strong>What do you want to say? (Your Intent)</strong>
+            <span class="help-text">Direct the AI on key points or facts. It won't invent promises or excuses.</span>
+          </label>
+          <textarea id="intent-input" name="intent" rows="2" class="form-control" placeholder="e.g. Yes definitely, but let's meet around 7:30pm because I have a meeting till 6. Ask if they want dinner too."></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-half">
+            <label for="length_preference">Reply Length</label>
+            <select id="length_preference" name="length_preference" class="form-control">
+              <option value="short">Short (Quick text / 1 line)</option>
+              <option value="medium" selected>Medium (1-2 sentences)</option>
+              <option value="long">Long (Detailed / explanatory)</option>
+            </select>
+          </div>
+
+          <div class="form-group col-half">
+            <label for="style_intensity">Style Match Intensity</label>
+            <select id="style_intensity" name="style_intensity" class="form-control">
+              <option value="subtle">Subtle (Polite & gentle match)</option>
+              <option value="moderate" selected>Moderate (Natural casual match)</option>
+              <option value="strong">Strong (Strict lowercase, slang & emojis)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-half">
+            <label for="num_drafts">Number of Options</label>
+            <select id="num_drafts" name="num_drafts" class="form-control">
+              <option value="1">1 Option</option>
+              <option value="2" selected>2 Options</option>
+              <option value="3">3 Options</option>
+            </select>
+          </div>
+          <div class="form-group col-half">
+            <label for="model_name">Model</label>
+            <input type="text" id="model_name" name="model_name" class="form-control" placeholder="Default from settings (e.g. llama3.2)">
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary btn-large">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            Generate Reply Drafts
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Right: Results -->
+    <div class="panel-card">
+      <div class="card-header">
+        <h2 class="card-title">Generated Drafts</h2>
+        <div id="draft-loading" class="htmx-indicator">
+          <span class="spinner"></span> Drafting locally with Ollama...
+        </div>
+      </div>
+
+      <div id="draft-results-container">
+        <div class="empty-state">
+          <div class="empty-icon">💬</div>
+          <h3>Ready to Draft</h3>
+          <p>Paste the message context on the left and enter what you want to convey. The local model will generate WhatsApp-style options matching your profile.</p>
+          <div class="draft-disclaimer-callout">
+            <span class="warning-icon">⚠️</span>
+            <span><strong>Always review:</strong> Every draft is clearly labeled as AI-generated and must be approved before you copy or use it.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- TAB 2: IMPORT CHAT                         -->
+<!-- ========================================== -->
+<div id="tab-import" class="tab-panel">
+  <div class="panel-card max-width-lg">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Import WhatsApp Chat Export (.txt)</h2>
+        <p class="card-subtitle">Learn your writing habits without uploading conversations to the cloud.</p>
+      </div>
+      <span class="badge badge-success">Local Parsing Only</span>
+    </div>
+
+    <div class="privacy-notice-box">
+      <h4>🔒 Authorization & Privacy Disclosure</h4>
+      <p>
+        WhatsApp chat exports include personal messages and other people's private data.
+        <strong>Only import chats you have explicit permission to use.</strong>
+        By default:
+      </p>
+      <ul>
+        <li>Messages from other participants are <strong>strictly discarded</strong>.</li>
+        <li>Sensitive patterns like phone numbers, emails, and links are <strong>automatically redacted</strong>.</li>
+        <li>The raw chat export file is <strong>never stored on disk</strong> unless you explicitly choose to persist it.</li>
+      </ul>
+    </div>
+
+    <!-- File Upload Form -->
+    <form id="upload-form" hx-post="/api/chat/preview" hx-target="#preview-area" hx-indicator="#upload-loading" enctype="multipart/form-data">
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="chat-file-input" name="file" accept=".txt" class="file-input" onchange="handleFileSelected(this)" required>
+        <div class="drop-content">
+          <div class="drop-icon">📁</div>
+          <div class="drop-text">
+            <strong>Choose a WhatsApp .txt export</strong> or drag and drop here
+          </div>
+          <div class="drop-subtext">Supports iOS bracketed and Android timestamped export formats (up to 25MB).</div>
+          <div id="selected-filename" class="selected-file-label"></div>
+        </div>
+      </div>
+
+      <div class="form-actions mt-3">
+        <button type="submit" class="btn btn-primary">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path></svg>
+          Parse & Preview Export
+        </button>
+        <div id="upload-loading" class="htmx-indicator">
+          <span class="spinner"></span> Parsing chat text and detecting participants...
+        </div>
+      </div>
+    </form>
+
+    <!-- Preview Area: Loaded dynamically via chat_preview.html -->
+    <div id="preview-area" class="mt-4"></div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- TAB 3: STYLE PROFILE                       -->
+<!-- ========================================== -->
+<div id="tab-profile" class="tab-panel">
+  <div id="profile-container" hx-get="/api/profile/view" hx-trigger="load" hx-swap="innerHTML">
+    <div class="loading-state">
+      <span class="spinner"></span> Loading style profile...
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- TAB 4: SETTINGS & PRIVACY                  -->
+<!-- ========================================== -->
+<div id="tab-settings" class="tab-panel">
+  <div class="grid-2col">
+    <!-- Left: Ollama & Privacy Configuration -->
+    <div class="panel-card">
+      <div class="card-header">
+        <h2 class="card-title">Ollama Model & Privacy Config</h2>
+        <span class="badge badge-neutral">Local Host</span>
+      </div>
+
+      <form hx-post="/api/settings" hx-target="#ollama-status-container" hx-swap="innerHTML">
+        <div class="form-group">
+          <label for="ollama_url">
+            <strong>Ollama Base URL</strong>
+            <span class="help-text">Local HTTP server where Ollama is running.</span>
+          </label>
+          <input type="text" id="ollama_url" name="ollama_url" class="form-control" value="{{ ollama_cfg.base_url }}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="ollama_model">
+            <strong>Active Model Name</strong>
+            <span class="help-text">Installed Ollama model (e.g. <code>llama3.2</code>, <code>mistral</code>, <code>qwen2.5:3b</code>).</span>
+          </label>
+          <input type="text" id="ollama_model" name="ollama_model" class="form-control" value="{{ ollama_cfg.model }}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="ollama_timeout">
+            <strong>Request Timeout (seconds)</strong>
+          </label>
+          <input type="number" id="ollama_timeout" name="ollama_timeout" class="form-control" value="{{ ollama_cfg.timeout_seconds }}" min="5" max="300" step="5">
+        </div>
+
+        <div class="form-group">
+          <label for="custom_banned_terms">
+            <strong>Custom Exclusion Keywords (Comma-separated)</strong>
+            <span class="help-text">Words, names, addresses, or secrets that must never appear in profiles or drafts.</span>
+          </label>
+          <textarea id="custom_banned_terms" name="custom_banned_terms" rows="2" class="form-control" placeholder="e.g. secretproject, MyCompany, Jane, apartment 4B">{{ priv_cfg.custom_banned_terms | join(', ') }}</textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save Settings</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Right: Data Purge & Local Reset -->
+    <div class="panel-card danger-zone">
+      <div class="card-header">
+        <h2 class="card-title text-danger">Data Management & Reset</h2>
+        <span class="badge badge-error">Irreversible</span>
+      </div>
+
+      <div class="danger-box">
+        <h4>Permanent Purge & Delete</h4>
+        <p>
+          Need to remove all learned data? This will instantly and permanently erase:
+        </p>
+        <ul>
+          <li>All saved style profiles</li>
+          <li>All custom rules and exclusion words</li>
+          <li>Any stored messages or temporary files</li>
+        </ul>
+
+        <div id="purge-alert-area"></div>
+
+        <div class="mt-3">
+          <button class="btn btn-danger" onclick="confirmPurge()">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            Purge All Data From This Machine
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <h4>Export / Import Profile Backup</h4>
+        <p class="text-muted">Export your style profile as a clean JSON file, or restore from a previous backup.</p>
+        <div class="btn-group">
+          <a href="/api/profile/export" class="btn btn-outline" download>Export Profile JSON</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

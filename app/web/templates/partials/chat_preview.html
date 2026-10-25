@@ -1,0 +1,134 @@
+<div class="preview-card">
+  <div class="preview-header">
+    <div>
+      <h3 class="preview-title">Chat Export Analysis: {{ filename }}</h3>
+      <p class="text-muted">Parsed {{ result.total_lines }} lines successfully.</p>
+    </div>
+  </div>
+
+  <!-- Metric Badges -->
+  <div class="stats-row">
+    <div class="stat-box">
+      <span class="stat-number">{{ result.user_message_count }}</span>
+      <span class="stat-label">User Messages</span>
+    </div>
+    <div class="stat-box">
+      <span class="stat-number">{{ result.senders | length }}</span>
+      <span class="stat-label">Participants</span>
+    </div>
+    <div class="stat-box">
+      <span class="stat-number">{{ result.media_count }}</span>
+      <span class="stat-label">Media Omitted</span>
+    </div>
+    <div class="stat-box">
+      <span class="stat-number">{{ result.system_message_count }}</span>
+      <span class="stat-label">System Notices</span>
+    </div>
+  </div>
+
+  <form hx-post="/api/profile/build" hx-target="#profile-container" hx-indicator="#build-loading" onsubmit="switchTab('tab-profile')">
+    <input type="hidden" name="session_id" value="{{ session_id }}">
+
+    <div class="form-group mt-3">
+      <label>
+        <strong>1. Identify Your Sender Name or Phone Number:</strong>
+        <span class="help-text">Only messages from your selected identity will be used to learn your style. Everyone else's messages are discarded.</span>
+      </label>
+
+      <div class="senders-table-wrapper">
+        <table class="senders-table">
+          <thead>
+            <tr>
+              <th width="40">Select</th>
+              <th>Participant / Sender</th>
+              <th>Messages</th>
+              <th>Share of Chat</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sender, count in result.senders.items() %}
+            <tr>
+              <td>
+                <input type="radio" id="sender_{{ loop.index }}" name="sender_name" value="{{ sender }}" {% if loop.first %}checked{% endif %} required>
+              </td>
+              <td>
+                <label for="sender_{{ loop.index }}" class="sender-label">
+                  <strong>{{ sender }}</strong>
+                </label>
+              </td>
+              <td>{{ count }}</td>
+              <td>
+                <div class="progress-bar-container">
+                  <div class="progress-bar" style="width: {{ (count / (result.user_message_count or 1) * 100) | round(1) }}%;"></div>
+                  <span class="progress-label">{{ (count / (result.user_message_count or 1) * 100) | round(1) }}%</span>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="form-group mt-3">
+      <label for="profile_name_input">
+        <strong>2. Name Your Style Profile:</strong>
+      </label>
+      <input type="text" id="profile_name_input" name="profile_name" class="form-control" value="My WhatsApp Style" required>
+    </div>
+
+    <!-- Privacy Rules -->
+    <div class="privacy-settings-box mt-3">
+      <h4 class="privacy-title">🔒 3. Privacy & Sanitization Filters:</h4>
+      <div class="checkbox-grid">
+        <label class="checkbox-item">
+          <input type="checkbox" name="redact_phones" value="true" checked>
+          <span>Redact Phone Numbers</span>
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" name="redact_emails" value="true" checked>
+          <span>Redact Email Addresses</span>
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" name="redact_urls" value="true" checked>
+          <span>Redact URLs & Web Links</span>
+        </label>
+        <label class="checkbox-item">
+          <input type="checkbox" name="redact_financial" value="true" checked>
+          <span>Redact Credit Cards & Financial info</span>
+        </label>
+      </div>
+
+      <div class="form-row mt-2">
+        <div class="form-group col-half">
+          <label for="filter_action">Action on Sensitive Content:</label>
+          <select id="filter_action" name="filter_action" class="form-control">
+            <option value="redact" selected>Redact sensitive text (replace with [REDACTED])</option>
+            <option value="drop">Drop entire message from training</option>
+          </select>
+        </div>
+        <div class="form-group col-half">
+          <label for="custom_terms">Additional Banned Terms (comma-separated):</label>
+          <input type="text" id="custom_terms" name="custom_terms" class="form-control" placeholder="e.g. secret, projectX, home address">
+        </div>
+      </div>
+
+      <div class="mt-2">
+        <label class="checkbox-item">
+          <input type="checkbox" name="save_raw" value="true">
+          <span>Persist extracted messages in local database (Default is unchecked: discard raw chat immediately after profile extraction)</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="form-actions mt-3">
+      <button type="submit" class="btn btn-primary btn-large">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"></path></svg>
+        Extract & Build Style Profile
+      </button>
+      <div id="build-loading" class="htmx-indicator">
+        <span class="spinner"></span> Analyzing writing habits, vocabulary, and punctuation...
+      </div>
+    </div>
+  </form>
+</div>

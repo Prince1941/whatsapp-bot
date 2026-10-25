@@ -1,0 +1,14 @@
+{% if ollama_status.is_connected %}
+  <div class="status-badge status-connected" title="Ollama connected: {{ ollama_status.available_models | length }} models found">
+    <span class="status-dot"></span>
+    <strong>Ollama Active</strong> ({{ ollama_cfg.model }})
+  </div>
+{% else %}
+  <div class="status-badge status-disconnected" title="{{ ollama_status.error_message }}">
+    <span class="status-dot"></span>
+    <strong>Ollama Offline</strong>
+  </div>
+{% endif %}
+{% if saved_message %}
+  <span class="text-success ml-2" style="font-size: 0.85rem;">{{ saved_message }}</span>
+{% endif %}
