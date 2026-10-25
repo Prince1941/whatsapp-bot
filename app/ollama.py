@@ -119,6 +119,8 @@ class OllamaClient:
             "stream": False,
             "options": {
                 "temperature": temperature,
+                "repeat_penalty": 1.15,
+                "top_p": 0.9,
             },
         }
 

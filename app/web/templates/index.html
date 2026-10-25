@@ -36,17 +36,17 @@
         <div class="form-group">
           <label for="context-input">
             <strong>Received Message / Conversation Context</strong>
-            <span class="help-text">Paste the message you received or the recent conversation snippet.</span>
+            <span class="help-text">Paste the message you received or conversation thread. The assistant will answer the latest message from your perspective.</span>
           </label>
-          <textarea id="context-input" name="context" rows="4" class="form-control" placeholder="e.g. Alex: Hey are we still on for the movie tomorrow night? What time works for you?" required></textarea>
+          <textarea id="context-input" name="context" rows="4" class="form-control" placeholder="e.g. kaisa hai bhai? OR Alex: Hey are we still on for dinner? What time works?" required></textarea>
         </div>
 
         <div class="form-group">
           <label for="intent-input">
-            <strong>What do you want to say? (Your Intent)</strong>
-            <span class="help-text">Direct the AI on key points or facts. It won't invent promises or excuses.</span>
+            <strong>What do you want to say? (Your Intent — Optional)</strong>
+            <span class="help-text">Optional extra guidance. Leave blank for a natural direct response. Supply facts only if specific information is needed.</span>
           </label>
-          <textarea id="intent-input" name="intent" rows="2" class="form-control" placeholder="e.g. Yes definitely, but let's meet around 7:30pm because I have a meeting till 6. Ask if they want dinner too."></textarea>
+          <textarea id="intent-input" name="intent" rows="2" class="form-control" placeholder="Optional. e.g. Yes definitely, but let's meet around 7:30pm."></textarea>
         </div>
 
         <div class="form-row">

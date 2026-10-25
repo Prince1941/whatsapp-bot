@@ -356,7 +356,7 @@ async def draft_replies(
             model=target_model,
         )
 
-        drafts = parse_draft_options(raw_output, draft_req.num_drafts)
+        drafts = parse_draft_options(raw_output, draft_req.num_drafts, incoming_text=draft_req.context)
 
         response_data = DraftResponse(
             drafts=drafts,

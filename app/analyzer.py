@@ -265,6 +265,9 @@ def select_safe_sample_snippets(messages: List[ChatMessage], limit: int = 4) -> 
                 continue
             if "http" in content.lower() or "@" in content:
                 continue
+            # Avoid questions in sample snippets so the model is not biased to echo questions
+            if "?" in content:
+                continue
             candidates.append(content)
 
     # Return unique snippets up to limit
