@@ -23,6 +23,23 @@
     </div>
   </div>
 
+  {% if result.needs_user_input %}
+    <div class="alert alert-warning mt-3" style="border-left: 4px solid #f59e0b; padding: 1rem; background: rgba(245, 158, 11, 0.15); color: #fef08a; border-radius: 6px;">
+      <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+        <span style="font-size: 1.4rem;">✋</span>
+        <div>
+          <strong style="font-size: 0.95rem; color: #fef08a;">Factual Answer Required in Intent Field</strong>
+          <p style="margin: 0.35rem 0 0.5rem 0; font-size: 0.88rem; line-height: 1.4; color: #fef9c3;">
+            {{ result.user_input_prompt }}
+          </p>
+          <span style="font-size: 0.8rem; opacity: 0.9; color: #fef08a;">
+            Please enter your factual answer (e.g. <em>"haan padh liya"</em>, <em>"nahi padha"</em>, or <em>"thoda baaki hai"</em>) in the <strong>Intent</strong> box above and click <strong>Draft Replies</strong>.
+          </span>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
   <div class="draft-list mt-3">
     {% for draft in result.drafts %}
       <div class="draft-card" id="draft-card-{{ loop.index }}">

@@ -416,3 +416,202 @@ mast hu bhai
     assert len(drafts) == 2
     assert drafts[0] == "thik hu, tu bata"
     assert drafts[1] == "mast hu bhai"
+
+
+# ============================================================================
+# FOCUSED INTENT & FACTUAL QUESTION TESTS (padh liya, khana khaya, etc.)
+# ============================================================================
+@pytest.mark.asyncio
+async def test_padh_liya_three_intents_produce_concise_styled_answers(temp_db):
+    """
+    Verify 'padh liya?' with explicit intents produces concise versions of the intent
+    using the user's learned spelling habits (ha, nhi, h), without adding unrelated content.
+    """
+    profile = StyleProfile(
+        profile_name="Prince Kr Style",
+        sender_name="Prince Kr",
+        capitalization=CapitalizationStyle(primary_case="all_lowercase"),
+        punctuation=PunctuationStats(period_ending_freq=0.05),
+        spelling_preferences={"theek": "thik", "hai": "h", "hoon": "hu", "nahi": "nhi", "haan": "ha", "kal": "kl"},
+    )
+    temp_db.save_profile(profile)
+    transport = httpx.ASGITransport(app=app)
+
+    test_cases = [
+        ("haan padh liya", "ha padh liya"),
+        ("thoda bahut aur baaki hai", "thoda bahut aur baaki h"),
+        ("nahi padha", "nhi padha"),
+        ("bas thoda aur baaki h", "bas thoda aur baaki h"),
+    ]
+
+    for intent_input, expected_core in test_cases:
+        mock_raw = f"""
+=== DRAFT 1 ===
+{intent_input}
+
+=== DRAFT 2 ===
+{intent_input}
+"""
+        with patch("app.web.main.OllamaClient.generate_chat", new_callable=AsyncMock) as mock_gen:
+            mock_gen.return_value = mock_raw
+
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+                data = {
+                    "context": "padh liya?",
+                    "intent": intent_input,
+                    "length_preference": "short",
+                    "style_intensity": "strong",
+                    "num_drafts": 2,
+                }
+                resp = await ac.post("/api/draft", data=data)
+                assert resp.status_code == 200
+
+                # Must not contain textbook unlearned spelling
+                if "haan" in intent_input:
+                    assert "haan" not in resp.text
+                if "nahi" in intent_input:
+                    assert "nahi" not in resp.text
+                if " hai" in intent_input:
+                    assert " hai" not in resp.text
+
+                # Must contain the user's concise styled version
+                assert expected_core in resp.text
+
+
+@pytest.mark.asyncio
+async def test_blank_intent_unknown_fact_returns_needs_user_input(temp_db):
+    """
+    When the incoming message asks a factual personal question ('padh liya?')
+    and intent is blank with no answer in context, the assistant must return
+    a needs-user-input result rather than fabricating an answer.
+    """
+    profile = StyleProfile(profile_name="Prince Kr Style", sender_name="Prince Kr")
+    temp_db.save_profile(profile)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        data = {
+            "context": "padh liya?",
+            "intent": "",  # Blank intent
+            "length_preference": "short",
+            "style_intensity": "moderate",
+            "num_drafts": 2,
+        }
+        resp = await ac.post("/api/draft", data=data)
+        assert resp.status_code == 200
+
+        # UI must clearly notify user that a factual answer is needed
+        assert "Answer Required in Intent Field" in resp.text
+        assert "whether you studied" in resp.text
+        assert "Please specify your answer in the Intent field" in resp.text
+
+
+def test_style_variations_preserve_intent_meaning():
+    """
+    Verify style variations (casing, spelling normalization, punctuation)
+    preserve the intent's meaning and eliminate hallucinated tasks.
+    """
+    profile = StyleProfile(
+        profile_name="Prince Kr Style",
+        sender_name="Prince Kr",
+        capitalization=CapitalizationStyle(primary_case="all_lowercase"),
+        punctuation=PunctuationStats(period_ending_freq=0.05),
+        spelling_preferences={"theek": "thik", "hai": "h", "hoon": "hu", "nahi": "nhi", "haan": "ha"},
+    )
+
+    # Simulated Ollama output that hallucinated an unrelated instruction
+    raw_output = """
+=== DRAFT 1 ===
+thoda aur bhi padh raha hu.
+
+=== DRAFT 2 ===
+baki kaam karo tu padha.
+"""
+    drafts = parse_draft_options(
+        raw_output=raw_output,
+        expected_count=2,
+        incoming_text="padh liye?",
+        profile=profile,
+        user_intent="bas thoda aur baaki h",
+    )
+
+    # Hallucinated draft 'baki kaam karo tu padha' must be eliminated
+    for d in drafts:
+        assert "baki kaam karo" not in d
+        assert "tu padha" not in d
+
+    # Both drafts must faithfully convey that some studying remains
+    assert len(drafts) == 2
+    assert "bas thoda aur baaki h" in drafts[0]
+    assert any("thoda" in d for d in drafts)
+
+
+def test_multiple_options_do_not_contradict_one_another():
+    """
+    Verify that multiple draft options for an intent do not contradict each other
+    (e.g., negative intent 'nahi padha' must not produce affirmative drafts).
+    """
+    profile = StyleProfile(
+        profile_name="Prince Kr Style",
+        sender_name="Prince Kr",
+        spelling_preferences={"theek": "thik", "hai": "h", "hoon": "hu", "nahi": "nhi", "haan": "ha"},
+    )
+
+    # Model returned 1 negative and 1 affirmative draft
+    raw_output = """
+=== DRAFT 1 ===
+nhi padha abhi
+
+=== DRAFT 2 ===
+ha padh liya maine
+"""
+    drafts = parse_draft_options(
+        raw_output=raw_output,
+        expected_count=2,
+        incoming_text="padh liya?",
+        profile=profile,
+        user_intent="nahi padha",
+    )
+
+    assert len(drafts) == 2
+    for d in drafts:
+        # None of the options may say yes when intent is no
+        assert "ha padh liya" not in d
+        assert "nhi" in d or "nahi" in d
+
+
+@pytest.mark.asyncio
+async def test_intent_reaches_ollama_prompt_correctly(temp_db):
+    """
+    Verify that the intent field is correctly forwarded to the Ollama prompt,
+    not truncated, and explicitly labeled as the factual content to convey.
+    """
+    profile = StyleProfile(profile_name="Prince Kr Style", sender_name="Prince Kr")
+    temp_db.save_profile(profile)
+    transport = httpx.ASGITransport(app=app)
+
+    with patch("app.web.main.OllamaClient.generate_chat", new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = "=== DRAFT 1 ===\nbas thoda aur baaki h\n=== DRAFT 2 ===\nthoda baaki h abhi"
+
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            data = {
+                "context": "padh liye?",
+                "intent": "bas thoda aur baaki h",
+                "length_preference": "short",
+                "style_intensity": "strong",
+                "num_drafts": 2,
+            }
+            resp = await ac.post("/api/draft", data=data)
+            assert resp.status_code == 200
+
+            call_args = mock_gen.call_args
+            usr_prompt = call_args.kwargs.get("user_prompt") or call_args.args[1]
+            sys_prompt = call_args.kwargs.get("system_prompt") or call_args.args[0]
+
+            # Intent must be explicitly labeled and intact
+            assert "bas thoda aur baaki h" in usr_prompt
+            assert "USER INTENT / FACTS TO CONVEY:" in usr_prompt
+            assert "Intent is the factual content to convey; style profile only controls phrasing" in usr_prompt
+            assert "Intent is the factual content to convey; style profile only controls phrasing" in sys_prompt
+            assert '"padh liye?"' in usr_prompt
+

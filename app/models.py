@@ -99,6 +99,8 @@ class DraftResponse(BaseModel):
     model_used: str
     confidence_level: str = "none"
     learned_phrases_applied: List[str] = Field(default_factory=list)
+    needs_user_input: bool = False
+    user_input_prompt: Optional[str] = None
     timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     disclaimer: str = "AI-generated draft — review and approve before sending"
 

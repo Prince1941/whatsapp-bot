@@ -17,7 +17,13 @@ from app.models import (
 from app.parser import parse_whatsapp_export
 from app.privacy import PrivacyFilter
 from app.analyzer import build_style_profile
-from app.prompt import build_system_prompt, build_user_prompt, parse_draft_options
+from app.prompt import (
+    build_system_prompt,
+    build_user_prompt,
+    parse_draft_options,
+    is_factual_personal_question,
+    extract_incoming_and_history,
+)
 from app.ollama import (
     OllamaClient,
     OllamaError,
@@ -358,6 +364,35 @@ async def draft_replies(
             custom_notes="Casual, friendly WhatsApp reply.",
         )
 
+    client = get_ollama_client()
+    target_model = draft_req.model_name or client.config.model
+
+    history, incoming = extract_incoming_and_history(draft_req.context)
+    target_incoming = incoming if incoming else draft_req.context.strip()
+
+    # If incoming message asks an unknown factual personal question and intent is blank:
+    requires_fact, fact_topic = is_factual_personal_question(target_incoming, history)
+    if requires_fact and not (draft_req.intent and draft_req.intent.strip()):
+        response_data = DraftResponse(
+            drafts=[
+                "Please specify your answer in the Intent field (e.g. 'haan padh liya', 'nahi padha', or 'thoda baaki hai') so the assistant doesn't guess."
+            ],
+            model_used=target_model,
+            confidence_level=profile.confidence_level,
+            needs_user_input=True,
+            user_input_prompt=f"The incoming message asks a personal factual question ({fact_topic}). Please provide your factual answer in the Intent field above to avoid guessing.",
+        )
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/draft_results.html",
+            context={
+                "result": response_data,
+                "context": context,
+                "intent": intent,
+                "profile": profile,
+            },
+        )
+
     # Construct prompts with data-grounded spelling and retrieval
     system_prompt = build_system_prompt(
         profile,
@@ -367,13 +402,10 @@ async def draft_replies(
     )
     user_prompt = build_user_prompt(draft_req, profile=profile)
 
-    client = get_ollama_client()
-    target_model = draft_req.model_name or client.config.model
-
     try:
         # Conservative token and temperature settings for short chat replies
         max_tokens = 60 if draft_req.length_preference == "short" else 140
-        temp = 0.4 if draft_req.length_preference == "short" else 0.55
+        temp = 0.35 if (draft_req.intent and draft_req.intent.strip()) else (0.4 if draft_req.length_preference == "short" else 0.55)
 
         raw_output = await client.generate_chat(
             system_prompt=system_prompt,
@@ -388,6 +420,7 @@ async def draft_replies(
             draft_req.num_drafts,
             incoming_text=draft_req.context,
             profile=profile,
+            user_intent=draft_req.intent or "",
         )
 
         # Track which authentic learned phrases were applied
